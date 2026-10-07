@@ -69,6 +69,7 @@ from . import op_unwrap_faces_iron
 from . import op_uv_channel_add
 from . import op_uv_channel_remove
 from . import op_uv_channel_swap
+from . import op_uv_channel_active_render
 from . import op_uv_crop
 from . import op_uv_fill
 from . import op_uv_resize
@@ -801,6 +802,7 @@ class UI_PT_Panel_Units(Panel):
                     group.prop(tt_settings(), "uv_channel", text="")
                     group.operator(op_uv_channel_add.op.bl_idname, text="", icon='ADD')
                     group.operator(op_uv_channel_remove.op.bl_idname, text="", icon='REMOVE')
+                    group.operator(op_uv_channel_active_render.op.bl_idname, text="", icon='RESTRICT_RENDER_OFF')
 
                     r = group.column(align=True)
                     r.active = obj.data.uv_layers.active_index > 0
@@ -1693,6 +1695,7 @@ classes = (
     op_uv_channel_add.op,
     op_uv_channel_remove.op,
     op_uv_channel_swap.op,
+    op_uv_channel_active_render.op,
     op_uv_crop.op,
     op_uv_fill.op,
     op_uv_resize.op,
