@@ -1,12 +1,6 @@
 import bpy
-import bmesh
 
-from . import utilities_color
-from . import utilities_bake
-from . import utilities_ui
-
-
-gamma = 2.2
+from .services import color_assign_service
 
 
 
@@ -38,39 +32,8 @@ class op(bpy.types.Operator):
 
 
 def convert_vertex_colors(self, context):
-	context_override = utilities_ui.GetContextView3D()
-	if not context_override:
-		self.report({'ERROR_INVALID_INPUT'}, "This tool requires an available View3D view.")
-		return {'CANCELLED'}
-
 	obj = bpy.context.active_object
-
-	for i in range(len(obj.material_slots)):
-		slot = obj.material_slots[i]
-		if slot.material:
-
-			# Select related faces
-			bpy.ops.object.mode_set(mode='EDIT')
-			bpy.ops.mesh.select_all(action='DESELECT')
-
-			bm = bmesh.from_edit_mesh(bpy.context.active_object.data)
-			for face in bm.faces:
-				if face.material_index == i:
-					face.select = True
-
-			color = utilities_color.get_color(i).copy()
-			# Fix Gamma
-			color[0] = pow(color[0],1/gamma)
-			color[1] = pow(color[1],1/gamma)
-			color[2] = pow(color[2],1/gamma)
-			
-			utilities_bake.assign_vertex_color(obj)
-
-			bpy.ops.object.mode_set(mode='VERTEX_PAINT')
-			bpy.context.tool_settings.vertex_paint.brush.color = color
-			bpy.context.object.data.use_paint_mask = True
-			with bpy.context.temp_override(**context_override):
-				bpy.ops.paint.vertex_color_set()
+	color_assign_service.convert_materials_to_vertex_colors(obj)
 
 	# Back to object mode
 	bpy.ops.object.mode_set(mode='VERTEX_PAINT')
