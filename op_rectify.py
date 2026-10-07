@@ -16,6 +16,8 @@ class op(bpy.types.Operator):
             return False
         if context.active_object.mode != 'EDIT':
             return False
+        if context.active_object.type != 'MESH':
+            return False
         if not context.object.data.uv_layers:
             return False
         return True
