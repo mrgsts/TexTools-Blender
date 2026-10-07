@@ -125,7 +125,7 @@ class op(bpy.types.Operator):
                                 if modes[bake_mode].relink['needed'] or (
                                         bool_clean_transmission and bake_mode == 'transmission') or \
                                         (bool_alpha_ignore and bake_mode not in builtin_modes_material):
-                                    settings.bake_error = "BSDF nodes needed"
+                                    settings.bake_error = f"BSDF nodes needed: {slot.material.name}"
                                     return False
                     # else:
                     # 	settings.bake_error = "Materials needed"
@@ -298,6 +298,8 @@ def bake(self, mode, size, bake_force, sampling_scale, circular_report, color_re
     # Create dictionaries to remember original and temporary -copied- materials used in the baked objects
     previous_materials = {}
     copied_materials = {}
+    # Node groups made single user inside copied materials, removed at cleanup
+    copied_nodegroups = []
     # Container to save existing UDIM tile names of each set
     tiles = []
 
@@ -430,15 +432,15 @@ def bake(self, mode, size, bake_force, sampling_scale, circular_report, color_re
                     for slot in obj.material_slots:
                         if slot.material:
                             if slot.material not in relinkedMaterials:
-                                relink_nodes(mode, slot.material)
+                                relink_nodes(mode, slot.material, copied_nodegroups)
                                 relinkedMaterials.append(slot.material)
                             if modes[mode].type == 'EMIT' and settings.bversion >= 2.91:
                                 if slot.material not in EmissionIgnoredMaterials:
-                                    channel_ignore(modes['emission_strength'].relink['n'], slot.material)
+                                    channel_ignore(modes['emission_strength'].relink['n'], slot.material, copied_nodegroups)
                                     EmissionIgnoredMaterials.append(slot.material)
                             if (bool_alpha_ignore and mode != 'ao' and mode != 'diffuse') or mode == 'alpha':
                                 if slot.material not in AlphaIgnoredMaterials:
-                                    channel_ignore(modes['alpha'].relink['n'], slot.material)
+                                    channel_ignore(modes['alpha'].relink['n'], slot.material, copied_nodegroups)
                                     AlphaIgnoredMaterials.append(slot.material)
                     if setup_bake_nodes:
                         setup_image_bake_node(obj, bakeReadyMaterials, image_name, previous_image_name, imagecopy_name)
@@ -456,11 +458,11 @@ def bake(self, mode, size, bake_force, sampling_scale, circular_report, color_re
                                             bsdf_node = ng
                             if bsdf_node:
                                 if slot.material not in EmissionIgnoredMaterials:
-                                    channel_ignore(modes['emission_strength'].relink['n'], slot.material)
+                                    channel_ignore(modes['emission_strength'].relink['n'], slot.material, copied_nodegroups)
                                     EmissionIgnoredMaterials.append(slot.material)
                                 if (bool_alpha_ignore and mode != 'ao' and mode != 'diffuse') or mode == 'alpha':
                                     if slot.material not in AlphaIgnoredMaterials:
-                                        channel_ignore(modes['alpha'].relink['n'], slot.material)
+                                        channel_ignore(modes['alpha'].relink['n'], slot.material, copied_nodegroups)
                                         AlphaIgnoredMaterials.append(slot.material)
                     if setup_bake_nodes:
                         setup_image_bake_node(obj, bakeReadyMaterials, image_name, previous_image_name, imagecopy_name)
@@ -480,7 +482,7 @@ def bake(self, mode, size, bake_force, sampling_scale, circular_report, color_re
                                                     bsdf_node = ng
                                     if bsdf_node:
                                         if slot.material not in AlphaIgnoredMaterials:
-                                            channel_ignore(modes['alpha'].relink['n'], slot.material)
+                                            channel_ignore(modes['alpha'].relink['n'], slot.material, copied_nodegroups)
                                             AlphaIgnoredMaterials.append(slot.material)
                     if setup_bake_nodes:
                         setup_image_bake_node(obj, bakeReadyMaterials, image_name, previous_image_name, imagecopy_name)
@@ -655,6 +657,10 @@ def bake(self, mode, size, bake_force, sampling_scale, circular_report, color_re
         for mtl in copied_materials.values():
             bpy.data.materials.remove(bpy.data.materials[mtl], do_unlink=True)
 
+        for nodegroup in copied_nodegroups:
+            if nodegroup.users == 0:
+                bpy.data.node_groups.remove(nodegroup, do_unlink=True)
+
         if "TT_bake_node" in bpy.data.materials:
             bpy.data.materials.remove(bpy.data.materials["TT_bake_node"], do_unlink=True)
 
@@ -670,7 +676,7 @@ def bake(self, mode, size, bake_force, sampling_scale, circular_report, color_re
                         tree = material.node_tree
                         for node in tree.nodes:
                             if node.bl_idname == 'ShaderNodeTexImage':
-                                if node.image == bpy.data.images[images[1]]:
+                                if node.image and node.image == bpy.data.images[images[1]]:
                                     if material in copied_materials:
                                         circular_report[0] = True
                                     node.image = bpy.data.images[images[0]]
@@ -694,7 +700,7 @@ def bake(self, mode, size, bake_force, sampling_scale, circular_report, color_re
                         tree = material.node_tree
                         for node in tree.nodes:
                             if node.bl_idname == 'ShaderNodeTexImage':
-                                if node.image.name == images[0]:
+                                if node.image and node.image.name == images[0]:
                                     node.image = bpy.data.images[images[0]]
 
             # Always set proper name to the newly baked image (when all previous or temporary images have been removed)
@@ -934,19 +940,34 @@ def setup_image_bake_node(obj, bakeReadyMaterials, image_name, previous_image_na
                     bakeReadyMaterials.append(slot.material.name)
 
 
-def relink_nodes(mode, material):
-    if not material.use_nodes:
-        material.use_nodes = True
+def find_bsdf(material, copied_nodegroups):
+    """Return the (tree, Principled BSDF) to tune in a copied material.
+
+    A node group holding the BSDF is shared with the original material, so it is
+    made single user first; otherwise the tuning would leak into the original.
+    """
     tree = material.node_tree
     bsdf_node = None
     for n in tree.nodes:
         if n.bl_idname == "ShaderNodeBsdfPrincipled":
             bsdf_node = n
-        elif n.bl_idname == "ShaderNodeGroup":
+        elif n.bl_idname == "ShaderNodeGroup" and n.node_tree:
+            if not any(ng.bl_idname == "ShaderNodeBsdfPrincipled" for ng in n.node_tree.nodes):
+                continue
+            if n.node_tree not in copied_nodegroups:
+                n.node_tree = n.node_tree.copy()
+                copied_nodegroups.append(n.node_tree)
             for ng in n.node_tree.nodes:
                 if ng.bl_idname == "ShaderNodeBsdfPrincipled":
                     tree = n.node_tree
                     bsdf_node = ng
+    return tree, bsdf_node
+
+
+def relink_nodes(mode, material, copied_nodegroups):
+    if not material.use_nodes:
+        material.use_nodes = True
+    tree, bsdf_node = find_bsdf(material, copied_nodegroups)
 
     # set b, which is the base(original) socket index, and n, which is the new-values-source index for the base socket
     b, n = modes[mode].relink['b'], modes[mode].relink['n']
@@ -976,19 +997,10 @@ def relink_nodes(mode, material):
         bsdf_node.inputs[b].default_value = bsdf_node.inputs[n].default_value
 
 
-def channel_ignore(channel, material):
+def channel_ignore(channel, material, copied_nodegroups):
     if not material.use_nodes:
         material.use_nodes = True
-    tree = material.node_tree
-    bsdf_node = None
-    for n in tree.nodes:
-        if n.bl_idname == "ShaderNodeBsdfPrincipled":
-            bsdf_node = n
-        elif n.bl_idname == "ShaderNodeGroup":
-            for ng in n.node_tree.nodes:
-                if ng.bl_idname == "ShaderNodeBsdfPrincipled":
-                    tree = n.node_tree
-                    bsdf_node = ng
+    tree, bsdf_node = find_bsdf(material, copied_nodegroups)
 
     if len(bsdf_node.inputs[channel].links) != 0:
         tree.links.remove(bsdf_node.inputs[channel].links[0])
