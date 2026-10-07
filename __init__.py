@@ -34,6 +34,7 @@ from . import op_island_align_edge
 from . import op_island_align_sort
 from . import op_island_align_world
 from . import op_island_centralize
+from . import op_island_grid_straighten
 from . import op_island_mirror
 from . import op_island_rotate_90
 from . import op_island_straighten_edge_loops
@@ -68,6 +69,7 @@ from . import op_unwrap_faces_iron
 from . import op_uv_channel_add
 from . import op_uv_channel_remove
 from . import op_uv_channel_swap
+from . import op_uv_channel_active_render
 from . import op_uv_crop
 from . import op_uv_fill
 from . import op_uv_resize
@@ -800,6 +802,7 @@ class UI_PT_Panel_Units(Panel):
                     group.prop(tt_settings(), "uv_channel", text="")
                     group.operator(op_uv_channel_add.op.bl_idname, text="", icon='ADD')
                     group.operator(op_uv_channel_remove.op.bl_idname, text="", icon='REMOVE')
+                    group.operator(op_uv_channel_active_render.op.bl_idname, text="", icon='RESTRICT_RENDER_OFF')
 
                     r = group.column(align=True)
                     r.active = obj.data.uv_layers.active_index > 0
@@ -978,6 +981,12 @@ class UI_PT_Panel_Layout(Panel):
         row.operator(op_island_straighten_edge_loops.op.bl_idname, text="Straight",
                      icon_value=icon_get("op_island_straighten_edge_loops"))
         row.operator(op_rectify.op.bl_idname, text="Rectify", icon_value=icon_get("op_rectify"))
+
+        row = col.row(align=True)
+        row.operator(op_island_grid_straighten.op.bl_idname, text="Grid Straight",
+                     icon_value=icon_get("op_align_horizontal")).relax = False
+        row.operator(op_island_grid_straighten.op.bl_idname, text="Grid Relax",
+                     icon_value=icon_get("op_relax")).relax = True
 
         split = col.split(factor=0.75, align=True)
         split.operator(op_uv_unwrap.op.bl_idname, text="Unwrap", icon_value=icon_get("op_uv_unwrap")).axis = ''
@@ -1652,6 +1661,7 @@ classes = (
     op_island_align_edge.op,
     op_island_align_sort.op,
     op_island_align_world.op,
+    op_island_grid_straighten.op,
     op_island_mirror.op,
     op_island_rotate_90.op,
     op_island_straighten_edge_loops.op,
@@ -1685,6 +1695,7 @@ classes = (
     op_uv_channel_add.op,
     op_uv_channel_remove.op,
     op_uv_channel_swap.op,
+    op_uv_channel_active_render.op,
     op_uv_crop.op,
     op_uv_fill.op,
     op_uv_resize.op,

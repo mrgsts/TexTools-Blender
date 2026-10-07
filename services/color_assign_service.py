@@ -67,6 +67,25 @@ def assign_color(operator, context, index):
     return {'FINISHED'}
 
 
+def convert_materials_to_vertex_colors(obj):
+    """Paint every face with the palette color of its material slot index."""
+    bpy.ops.object.mode_set(mode='OBJECT')
+    layer = _get_or_create_color_layer(obj)
+
+    if not layer:
+        return False
+
+    colors = [_get_target_rgba(i) if slot.material else None for i, slot in enumerate(obj.material_slots)]
+
+    for poly in obj.data.polygons:
+        if poly.material_index < len(colors) and colors[poly.material_index]:
+            for loop_index in poly.loop_indices:
+                layer.data[loop_index].color = colors[poly.material_index]
+
+    obj.data.update()
+    return True
+
+
 def _get_target_rgba(index):
     raw_color = utilities_color.get_color(index)
     color = list(raw_color)

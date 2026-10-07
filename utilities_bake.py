@@ -1,6 +1,6 @@
 import bpy
 import bmesh
-from mathutils import Vector
+from mathutils import Color, Vector
 from math import pi
 
 from . import utilities_color
@@ -372,30 +372,27 @@ def assign_vertex_color(obj):
 
 
 
-def setup_vertex_color_selection(obj):
-	context_override = utilities_ui.GetContextView3D()
-	if not context_override:
-		print("This bake mode requires an available View3D view.")
+def paint_temp_vertex_colors(obj, get_face_color):
+	"""Write linear RGBA colors straight into the TexTools_temp corner attribute.
+
+	Avoids Vertex Paint operators, whose brush/unified color handling changed in
+	Blender 4.x/5.x and left these bakes black or tinted with the brush color.
+	"""
+	if obj.mode != 'OBJECT':
+		bpy.context.view_layer.objects.active = obj
+		bpy.ops.object.mode_set(mode='OBJECT')
+	layer = obj.data.color_attributes.get('TexTools_temp')
+	if layer is None:
 		return
+	for poly in obj.data.polygons:
+		color = get_face_color(poly)
+		for loop_index in poly.loop_indices:
+			layer.data[loop_index].color = color
+	obj.data.update()
 
-	bpy.ops.object.select_all(action='DESELECT')
-	obj.select_set(True)
-	bpy.context.view_layer.objects.active = obj
-	
-	bpy.ops.object.mode_set(mode='VERTEX_PAINT')
 
-	bpy.context.tool_settings.vertex_paint.brush.color = (0, 0, 0)
-	bpy.context.object.data.use_paint_mask = False
-	with bpy.context.temp_override(**context_override):
-		bpy.ops.paint.vertex_color_set()
-
-	bpy.context.tool_settings.vertex_paint.brush.color = (1, 1, 1)
-	bpy.context.object.data.use_paint_mask = True
-	with bpy.context.temp_override(**context_override):
-		bpy.ops.paint.vertex_color_set()
-	bpy.context.object.data.use_paint_mask = False
-
-	bpy.ops.object.mode_set(mode='OBJECT')
+def setup_vertex_color_selection(obj):
+	paint_temp_vertex_colors(obj, lambda poly: (1, 1, 1, 1) if poly.select else (0, 0, 0, 1))
 
 
 
@@ -423,42 +420,30 @@ def setup_vertex_color_dirty(obj):
 
 
 def setup_vertex_color_id_material(obj, previous_materials):
-	context_override = utilities_ui.GetContextView3D()
-	if not context_override:
-		print("This bake mode requires an available View3D view.")
-		return
+	colors = [None if mtlname is None else (*get_material_id_color(mtlname), 1) for mtlname in previous_materials[obj]]
+	black = (0, 0, 0, 1)
 
-	bpy.ops.object.select_all(action='DESELECT')
-	obj.select_set(True)
-	bpy.context.view_layer.objects.active = obj
-	bpy.ops.object.mode_set(mode='EDIT')
-	
-	bpy.ops.mesh.select_mode(use_extend=False, use_expand=False, type='FACE')
+	def face_color(poly):
+		if poly.material_index < len(colors):
+			return colors[poly.material_index] or black
+		return black
 
-	# bm = bmesh.from_edit_mesh(obj.data)
-	# colorLayer = bm.loops.layers.color.active
+	paint_temp_vertex_colors(obj, face_color)
 
-	for i, mtlname in enumerate(previous_materials[obj]):
-		if mtlname is not None:
-			# Select related faces
-			bpy.ops.object.mode_set(mode='EDIT')
-			bpy.ops.mesh.select_all(action='DESELECT')
 
-			bm = bmesh.from_edit_mesh(bpy.context.active_object.data)
-			for face in bm.faces:
-				if face.material_index == i:
-					face.select = True
-			
-			color = utilities_color.get_color_id(allMaterials.index(bpy.data.materials[mtlname]), 256, jitter=True)
-
-			bpy.ops.object.mode_set(mode='VERTEX_PAINT')
-			bpy.context.tool_settings.vertex_paint.brush.color = color
-			bpy.context.object.data.use_paint_mask = True
-			with bpy.context.temp_override(**context_override):
-				bpy.ops.paint.vertex_color_set()
-
-	obj.data.update()
-	bpy.ops.object.mode_set(mode='OBJECT')
+def get_material_id_color(material_name):
+	"""TexTools Color ID materials (TT_color_NN) bake with their palette color,
+	any other material with its index in the persistent material list."""
+	name = material_name.split('.')[0]
+	prefix = utilities_color.material_prefix
+	if name.startswith(prefix) and name[len(prefix):].isdigit():
+		index = int(name[len(prefix):])
+		if index < tt_settings().color_ID_count:
+			# The palette hex is gamma 2.2 encoded while the bake writes through Blender's sRGB
+			# curve: re-encode so the baked texel matches the hex shown in the palette.
+			encoded = Color([c ** (1 / utilities_color.gamma) for c in utilities_color.get_color(index)])
+			return tuple(encoded.from_srgb_to_scene_linear())
+	return tuple(utilities_color.get_color_id(allMaterials.index(bpy.data.materials[material_name]), 256, jitter=True))[:3]
 
 
 
