@@ -1,14 +1,14 @@
 schema_version = "1.0.0"
 
 id = "textools"
-version = "1.6.11"
+version = "1.6.12"
 name = "TexTools"
 tagline = "Professional UV and Texture tools for Blender"
 type = "add-on"
 
 maintainer = "renderhjs, franMarz, Sav Martin"
 # This is UNNOFFICIAL COMMUNITY FORK
-website = "https://github.com/unclepomedev/TexTools-Blender"
+website = "https://github.com/mrgsts/TexTools-Blender"
 
 
 blender_version_min = "5.0.0"
